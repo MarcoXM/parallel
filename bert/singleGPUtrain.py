@@ -5,27 +5,23 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from transformers import AdamW,get_linear_schedule_with_warmup
-import torch_xla.core.xla_model as xm
-from scipy import stats
-import torch_xla.distributed.xla_multiprocessing as xmp
-import torch_xla.distributed.parallel_loader as pl
+from scipy import stats 
 import warnings
 warnings.filterwarnings('ignore')
 
 
 class BERTBasedUncased(nn.Module):
-    def __init__(self,bert_path):
-        super(BERTBasedUncased).__init__()
+    def __init__(self, bert_path):
+        super(BERTBasedUncased,self).__init__()
 
         self.bert_path = bert_path
-        self.bert = transformers.BertModel.from_pretrained(self.bert_path) # bert model
+        self.bert = transformers.BertModel.from_pretrained(self.bert_path) # Load the model from pretrained
         self.bert_drop = nn.Dropout(0.3)
-        self.out = nn.Linear(768,30)
+        self.out = nn.Linear(768,30) # Getting 30 dimension ouput as result
 
     def forward(self,ids, mask, token_type_ids):
-        _, output2 = self.bert(ids, attention_mask = mask,token_type_ids=token_type_ids)
+        _, output2 = self.bert(ids, attention_mask = mask,token_type_ids=token_type_ids) # Bert have 2 output and the second one is our need
         finaloupt = self.out(output2)
-
         return finaloupt
 
 
@@ -35,7 +31,8 @@ class BertDatasetTrainning:
     def __init__(self,title, body, answer, targets, tokenizer, max_len):
         self.title = title
         self.body = body
-        self.answer = answer
+        self.answer = answer # 3type of data we need 
+
         self.tokenizer = tokenizer
         self.max_len = max_len
         self.targets = targets
@@ -45,23 +42,24 @@ class BertDatasetTrainning:
         return len(self.title)
 
 
-
     def __getitem__(self,idx):
-        title = self.title[idx]
-        body = self.body[idx]
-        answer = self.answer[idx]
+        title = str(self.title[idx])
+        body = str(self.body[idx])
+        answer = str(self.answer[idx])
 
         inputs = self.tokenizer.encode_plus(
             title + ' ' + body,
             answer,
-            add_special_token = True,
-            maxlen = self.max_len
-        )
+            add_special_tokens = True,
+            max_length = self.max_len
+        ) # It would return a tokened input  
+         
         ids = inputs['input_ids']
         token_type_ids = inputs['token_type_ids']
         mask = inputs['attention_mask']
 
-        padding_len = self.max_len - len(ids)
+        padding_len = self.max_len - len(ids) # get the padding length
+
         ids = ids + ([0] * padding_len)
         token_type_ids = token_type_ids + ([0] * padding_len)
         mask = mask  + ([0] * padding_len)
@@ -94,7 +92,7 @@ def training_loop_fn(data_loader, model, optimizer, device, scheduler = None):
         loss = loss_fn(output,target)
         losses.append(loss.item())
         loss.backward()
-        xm.optimizer_step(optimizer) #optimizer.step() # when only one node  ,barrier = True
+        optimizer.step() #optimizer.step() # when only one node  ,barrier = True
         if scheduler is not None:
             scheduler.step()
 
@@ -110,7 +108,7 @@ def eval_loop_fn(data_loader, model,device,):
         token_type_ids = data['token_type_ids'].to(device,dtype = torch.long)
         target = data['targets'].to(device,dtype = torch.float)
 
-        optimizer.zero_grad()
+
         output = model(ids=ids,mask=mask,token_type_ids=token_type_ids)
         loss = loss_fn(output,target)
         
@@ -120,27 +118,25 @@ def eval_loop_fn(data_loader, model,device,):
     return np.vstack(fin_output),np.vstack(fin_target)
         
 
-
-
-
-
-def main(index):
+def main():
     MAX_LEN = 512
     BATCH_SIZE = 4
     EPOCH = 20
 
-    df = pd.read_csv('./input/train.csv').fillna('none')
-    dftrain ,dftest = train_test_split(df,random_state = 42,test_size = 0.1)
+    df = pd.read_csv('data/train.csv').fillna('none')
+    dftrain ,dftest = train_test_split(df, random_state = 42, test_size = 0.1)
 
     dftrain = dftrain.reset_index(drop=True)
     dftest = dftest.reset_index(drop=True)
 
-    samplesubmission = pd.read_csv('.input/sample_submission.csv')
+    samplesubmission = pd.read_csv('data/sample_submission.csv')
     target_cols = list(samplesubmission.drop('qa_id',axis = 1).columns)
+
     train_target = dftrain[target_cols].values
     test_target = dftest[target_cols].values
+    
 
-    tokenizer = transformers.BertTokenizer('./input/bert_based_uncased')
+    tokenizer = transformers.BertTokenizer.from_pretrained('bert-base-uncased/')
     train_dataset = BertDatasetTrainning(
         title = dftrain.question_title.values,
         body = dftrain.question_body.values,
@@ -150,18 +146,10 @@ def main(index):
         max_len = MAX_LEN
     )
 
-    trainsampler = torch.utils.data.DistributedSampler(
-        train_dataset,
-        num_replicas=xm.xrt_world_size(),
-        rank = xm.get_ordinal(),
-        shuffle = True  
-    )
-
-
-    train_loader = torch.utils.data.Dataloader(
+    train_loader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size = BATCH_SIZE,
-        sampler = trainsampler
+        shuffle = True
     )
 
     valid_dataset = BertDatasetTrainning(
@@ -172,25 +160,21 @@ def main(index):
         tokenizer = tokenizer,
         max_len = MAX_LEN
     )
-    validsampler = torch.utils.data.DistributedSampler(
-        valid_dataset,
-        num_replicas=xm.xrt_world_size(),
-        rank = xm.get_ordinal()
-    )
 
 
-
-
-    valid_loader = torch.utils.data.Dataloader(
+    valid_loader = torch.utils.data.DataLoader(
         valid_dataset,
         batch_size = BATCH_SIZE,
-        sampler = validsampler  
+        shuffle = True 
     )
 
-    device = xm.xla_device()
-    lr = 3e-5 * xm.xrt_world_size()
-    model = BERTBasedUncased('../input/bert_based_uncased').to(device)
-    num_train_steps = int(len(train_dataset)/BATCH_SIZE/xm.xrt_world_size() * EPOCH)
+    ### Model
+
+    device ='cuda' if torch.cuda.is_available() else 'cpu'
+    lr = 3e-5
+    model = BERTBasedUncased('bert-base-uncased/').to(device)
+    num_train_steps = int(len(train_dataset)/BATCH_SIZE * EPOCH)
+
     optimizer = AdamW(model.parameters(),lr =lr)
 
 
@@ -201,12 +185,9 @@ def main(index):
     )
 
     for epoch in range(EPOCH):
+        training_loop_fn(train_loader,model,optimizer,device,scheduler)
 
-        paraloader = pl.ParallelLoader(train_loader,[device])
-        training_loop_fn(paraloader.per_decice_loader(deice),model,optimizer,device,scheduler)
-
-        paraloader = pl.ParallelLoader(valid_loader,[device])
-        o,t = eval_loop_fn(paraloader.per_decice_loader(deice),model,device)
+        o,t = eval_loop_fn(valid_loader,model,device)
 
         spear = []
         for jj in range(t.shape[1]):
@@ -216,9 +197,9 @@ def main(index):
             spear.append(coef)
 
         spear = np.mean(spear)
-        xm.master_print('Spearman is',spear)
-        xm.save(model.state_dict(),'model.bin')
+        print('Spearman is',spear)
+        torch.save(model.state_dict(),'model.bin')
 
 
 if __name__ =='__main__':
-    xmp.spawn(main,nprocs = 8)
+   main()
