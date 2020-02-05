@@ -7,70 +7,14 @@ from sklearn.model_selection import train_test_split
 from transformers import AdamW,get_linear_schedule_with_warmup
 from scipy import stats 
 import warnings
+from dataset import BertDatasetTrainning
+from models import BERTBasedUncased
 warnings.filterwarnings('ignore')
 
 
-class BERTBasedUncased(nn.Module):
-    def __init__(self, bert_path):
-        super(BERTBasedUncased,self).__init__()
-
-        self.bert_path = bert_path
-        self.bert = transformers.BertModel.from_pretrained(self.bert_path) # Load the model from pretrained
-        self.bert_drop = nn.Dropout(0.3)
-        self.out = nn.Linear(768,30) # Getting 30 dimension ouput as result
-
-    def forward(self,ids, mask, token_type_ids):
-        _, output2 = self.bert(ids, attention_mask = mask,token_type_ids=token_type_ids) # Bert have 2 output and the second one is our need
-        finaloupt = self.out(output2)
-        return finaloupt
 
 
 
-
-class BertDatasetTrainning:
-    def __init__(self,title, body, answer, targets, tokenizer, max_len):
-        self.title = title
-        self.body = body
-        self.answer = answer # 3type of data we need 
-
-        self.tokenizer = tokenizer
-        self.max_len = max_len
-        self.targets = targets
-
-
-    def __len__(self):
-        return len(self.title)
-
-
-    def __getitem__(self,idx):
-        title = str(self.title[idx])
-        body = str(self.body[idx])
-        answer = str(self.answer[idx])
-
-        inputs = self.tokenizer.encode_plus(
-            title + ' ' + body,
-            answer,
-            add_special_tokens = True,
-            max_length = self.max_len
-        ) # It would return a tokened input  
-         
-        ids = inputs['input_ids']
-        token_type_ids = inputs['token_type_ids']
-        mask = inputs['attention_mask']
-
-        padding_len = self.max_len - len(ids) # get the padding length
-
-        ids = ids + ([0] * padding_len)
-        token_type_ids = token_type_ids + ([0] * padding_len)
-        mask = mask  + ([0] * padding_len)
-
-        return {
-            "ids" : torch.tensor(ids, dtype = torch.long),
-            "mask" : torch.tensor(mask, dtype = torch.long),
-            "token_type_ids" : torch.tensor(token_type_ids, dtype = torch.long),
-            "targets" : torch.tensor(self.targets[idx,:], dtype = torch.float)
-
-        }
 
 
 def loss_fn(output,target):
@@ -197,7 +141,7 @@ def main():
             spear.append(coef)
 
         spear = np.mean(spear)
-        print('Spearman is',spear)
+        print('In the {} Spearman is{}'.format(epoch,spear))
         torch.save(model.state_dict(),'model.bin')
 
 
