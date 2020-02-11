@@ -11,12 +11,6 @@ from dataset import BertDatasetTrainning
 from models import BERTBasedUncased
 warnings.filterwarnings('ignore')
 
-
-
-
-
-
-
 def loss_fn(output,target):
     return nn.BCEWithLogitsLoss()(output,target)
 
@@ -64,8 +58,8 @@ def eval_loop_fn(data_loader, model,device,):
 
 def main():
     MAX_LEN = 512
-    BATCH_SIZE = 4
-    EPOCH = 20
+    BATCH_SIZE = 8
+    EPOCH = 100
 
     df = pd.read_csv('data/train.csv').fillna('none')
     dftrain ,dftest = train_test_split(df, random_state = 42, test_size = 0.1)
@@ -115,7 +109,7 @@ def main():
     ### Model
 
     device ='cuda' if torch.cuda.is_available() else 'cpu'
-    lr = 3e-5
+    lr = 2e-5
     model = BERTBasedUncased('bert-base-uncased/').to(device)
     num_train_steps = int(len(train_dataset)/BATCH_SIZE * EPOCH)
 
