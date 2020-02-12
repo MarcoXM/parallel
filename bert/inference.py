@@ -12,6 +12,7 @@ import warnings
 from scipy import stats
 from dataset import BertDatasetTrainning,BERTDatasetTest
 from models import BERTBasedUncased
+import glob
 warnings.filterwarnings('ignore')
 
 
@@ -26,7 +27,7 @@ def predict(test_batch_size,device, test_data,models_path ):
     answer = df.answer.values.astype(str).tolist()
     category = df.category.values.astype(str).tolist()
 
-    tokenizer = transformers.BertTokenizer.from_pretrained("../input/bert-base-uncased/", 
+    tokenizer = transformers.BertTokenizer.from_pretrained("bert-base-uncased/", 
                                                            do_lower_case=True)
     maxlen = 512
     predictions = []
@@ -45,7 +46,7 @@ def predict(test_batch_size,device, test_data,models_path ):
         num_workers=4
     )
 
-    model = BERTBaseUncased("bert-base-uncased/")
+    model = BERTBasedUncased("bert-base-uncased/")
     model.to(DEVICE)
     model.load_state_dict(torch.load(models_path))
     model.eval()
@@ -70,3 +71,19 @@ def predict(test_batch_size,device, test_data,models_path ):
             predictions.append(outputs)
 
     return np.vstack(predictions)
+
+if __name__ == '__main__':
+    SAMPLE_SUBMISSION = "data/sample_submission.csv"
+    sample = pd.read_csv(SAMPLE_SUBMISSION)
+    target_cols = list(sample.drop("qa_id", axis=1).columns)
+    ans = np.zeros_like(sample[target_cols].values)
+
+    models_p = sorted(glob.glob('BERT_FOLD_5/*.bin'))
+    print(models_p)
+    for i in range(len(models_p)):
+        prediction = predict(test_batch_size = 4 ,device='cuda', test_data = 'data/test.csv',models_path = models_p[i] )
+        ans +=prediction
+        print('Get Fold {} result '.format(i))
+    ans = ans/len(models_p)
+    sample[target_cols] = ans
+    sample.to_csv("submission_final.csv", index=False)
