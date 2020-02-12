@@ -130,9 +130,7 @@ def main():
 
         for epoch in range(EPOCH):
             training_loop_fn(train_loader,model,optimizer,device,scheduler)
-
             o,t = eval_loop_fn(valid_loader,model,device)
-
             spear = []
             for jj in range(t.shape[1]):
                 p1 = list(t[:,jj])
